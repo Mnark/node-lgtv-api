@@ -1,8 +1,7 @@
 const request = require('request');
 const xml2js = require('xml2js');
 const async = require('async');
-
-
+const http = require('http');
 const xmlBuilder = new xml2js.Builder();
 const xmlParser = new xml2js.Parser();
 
@@ -14,19 +13,29 @@ function LgTvApi(_host, _port, _pairingKey) {
     this.pairingKey = _pairingKey;
     this.session = null;
     this.debugMode = false;
+    this.tvType = 0;
 }
+
+LgTvApi.prototype.setTvType = function (_tvType) {
+    this.tvType = _tvType;
+};
+
 LgTvApi.prototype.setDebugMode = function (_debugMode) {
     this.debugMode = _debugMode;
 };
 
 LgTvApi.prototype.displayPairingKey = function (functionCallback) {
-    this.sendXMLRequest('/roap/api/auth', {auth: {type: 'AuthKeyReq'}}, (function (err, response, data) {
+    var payload = { auth: { type: 'AuthKeyReq' } };
+    if (this.tvType == 1) {
+        payload = '<?xml version="1.0" encoding="utf-8"?> <envelope><api type="pairing"><name>showKey</name></api></envelope>'
+    }
+    this.sendXMLRequest('/roap/api/auth', payload, function (err, response, data) {
         if (err || response.statusCode != 200) {
             functionCallback(err != null ? err : new Error('Response code:' + response.statusCode));
         } else {
             functionCallback(null);
         }
-    }).bind(this));
+    });
 };
 
 LgTvApi.prototype.authenticate = function (functionCallback) {
@@ -35,11 +44,11 @@ LgTvApi.prototype.authenticate = function (functionCallback) {
     } else {
         async.waterfall([
             (function (callback) {
-                this.sendXMLRequest('/roap/api/auth', {auth: {type: 'AuthReq', value: this.pairingKey}}, callback)
+                this.sendXMLRequest('/roap/api/auth', { auth: { type: 'AuthReq', value: this.pairingKey } }, callback)
             }).bind(this),
             (function (err, response, data, callback) {
                 if (err || response.statusCode != 200) {
-                    callback(err  ? err : new Error('Response code:' + response.statusCode), data);
+                    callback(err ? err : new Error('Response code:' + response.statusCode), data);
                 } else {
                     xmlParser.parseString(data, callback);
                 }
@@ -73,11 +82,11 @@ LgTvApi.prototype.processCommand = function (commandName, parameters, functionCa
 
     async.waterfall([
         (function (callback) {
-            this.sendXMLRequest('/roap/api/command', {command: parameters}, callback);
+            this.sendXMLRequest('/roap/api/command', { command: parameters }, callback);
         }).bind(this),
         (function (err, response, data, callback) {
             if (err || response.statusCode != 200) {
-                callback(err  ? err : new Error('Response code:' + response.statusCode), data);
+                callback(err ? err : new Error('Response code:' + response.statusCode), data);
             } else {
                 xmlParser.parseString(data, callback);
             }
@@ -134,25 +143,49 @@ LgTvApi.prototype.takeScreenShot = function (functionCallback) {
 };
 
 LgTvApi.prototype.sendXMLRequest = function (path, params, callback) {
-    let reqBody = xmlBuilder.buildObject(params);
-    if (this.debugMode) {
-        console.info('REQ:' + reqBody);
-    }
-    let uri = 'http://' + this.host + ':' + this.port + path;
-    let options = {
-        headers: {
-            'Content-Type': 'application/atom+xml',
-            'Connection': 'Keep-Alive'
-        },
-        body: reqBody
-    };
-    console.log(reqBody);
-    request.post(uri, options, (function (err, response, data) {
+    if (this.tvType == 0) {
+        let reqBody = xmlBuilder.buildObject(params);
         if (this.debugMode) {
-            console.info('RESP:' + data);
+            console.info('REQ:' + reqBody);
         }
-        callback(null, err, response, data);
-    }).bind(this));
+        let uri = 'http://' + this.host + ':' + this.port + path;
+        var options = {
+            headers: {
+                'Content-Type': 'application/atom+xml',
+                'Connection': 'Keep-Alive'
+            },
+            body: reqBody
+        };
+        request.post(uri, options, (function (err, response, data) {
+            if (this.debugMode) {
+                console.info('RESP:' + err ? err : data)
+            }
+            callback(err, response, data);
+        }).bind(this));
+    } else {
+        var options = {
+            'host': this.host,
+            'port': this.port,
+            'path': path,
+            'method': 'POST',
+            'headers': {
+                'Content-Type': 'text/xml',
+                'User-Agent': "'Apple iOS UDAP/2.0 Connect SDK'",
+                'Content-Length': params.length
+            }
+        };
+        if (this.debugMode) {
+            console.info("Options: " + JSON.stringify(options));
+        }
+        var req = http.request(options, (resp) => {
+            callback(null, resp);
+        })
+        req.on('error', (err) => {
+            callback(err)
+        })
+        req.write(params);
+        req.end();
+    }
 };
 
 LgTvApi.prototype.sendRequest = function (path, callback) {
