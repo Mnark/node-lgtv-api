@@ -23,6 +23,7 @@
   "dependencies": {
     "async": "2.0.1",
     "request": "~2.74.0",
-    "xml2js": "~0.4.17"
+    "xml2js": "~0.4.17",
+    "node-ssdp": "*"
   }
 }
